@@ -1,0 +1,183 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model activities {
+  id             Int       @id @default(autoincrement())
+  user_id        Int?
+  activity_key   String?   @db.VarChar(255)
+  title          String?   @db.VarChar(255)
+  response       String?
+  date           DateTime? @default(now()) @db.Timestamp(6)
+  completed_at   DateTime? @default(now()) @db.Timestamp(6)
+  version        Int?
+  feedback_type  String?   @db.VarChar(50)
+  feedback_value String?   @db.VarChar(255)
+  feedback_emoji String?   @db.VarChar(10)
+  feedback_label String?   @db.VarChar(255)
+}
+
+model daily_goals {
+  id         Int       @id @default(autoincrement())
+  user_id    Int?
+  text       String?
+  completed  Int?      @default(0) @db.SmallInt
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+  version    Int?      @default(0)
+}
+
+model five_min_activities {
+  id           Int       @id @default(autoincrement())
+  user_id      Int?
+  activity_key String?   @db.VarChar(255)
+  title        String?   @db.VarChar(255)
+  date         DateTime? @default(now()) @db.Timestamp(6)
+  completed_at DateTime? @default(now()) @db.Timestamp(6)
+  version      Int?      @default(0)
+}
+
+model icompleted {
+  id               Int       @id @default(autoincrement())
+  user_id          Int?
+  achievement_text String?
+  image            String?   @db.VarChar(512)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+  version          Int?      @default(0)
+}
+
+model not_to_dos {
+  id      Int       @id @default(autoincrement())
+  user_id Int?
+  habit   String    @db.VarChar(255)
+  date    DateTime? @default(now()) @db.Timestamp(6)
+  version Int?      @default(0)
+}
+
+model post_comments {
+  id         Int       @id @default(autoincrement())
+  post_id    Int?
+  user_id    Int?
+  text       String?
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  posts      posts?    @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users      users?    @relation("UserComments", fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model post_hashtags {
+  id      Int     @id @default(autoincrement())
+  post_id Int?
+  hashtag String? @db.VarChar(100)
+  posts   posts?  @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model post_likes {
+  id      Int    @id @default(autoincrement())
+  post_id Int?
+  user_id Int?
+  posts   posts? @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model posts {
+  id            Int             @id @default(autoincrement())
+  user_id       Int?
+  text          String?
+  image         String?         @db.VarChar(255)
+  deleted       Int?            @default(0) @db.SmallInt
+  created_at    DateTime?       @default(now()) @db.Timestamp(6)
+  updated_at    DateTime?       @default(now()) @db.Timestamp(6)
+  version       Int?            @default(0)
+  notifications notifications[] @relation("NotificationPost")
+  post_comments post_comments[]
+  post_hashtags post_hashtags[]
+  post_likes    post_likes[]
+  users         users?          @relation("UserPosts", fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model users {
+  id                     Int             @id @default(autoincrement())
+  name                   String          @db.VarChar(255)
+  email                  String          @unique @db.VarChar(255)
+  password               String
+  zip_code               String?         @db.VarChar(20)
+  gender                 String?         @db.VarChar(20)
+  timezone               String?         @db.VarChar(50)
+  bio                    String?
+  occupation             String?         @db.VarChar(100)
+  age_group              String?         @db.VarChar(20)
+  address                String?
+  hobbies                String?
+  music_taste            String?         @db.VarChar(100)
+  phone_usage            String?         @db.VarChar(50)
+  fav_musician           String?         @db.VarChar(100)
+  fav_sports             String?         @db.VarChar(100)
+  indoor_time            String?         @db.VarChar(50)
+  outdoor_time           String?         @db.VarChar(50)
+  fav_work               String?         @db.VarChar(100)
+  fav_place              String?         @db.VarChar(100)
+  personality            String?         @db.VarChar(100)
+  movie_genre            String?         @db.VarChar(100)
+  likes_to_travel        Int?            @db.SmallInt
+  profile_completed      Int?            @default(0) @db.SmallInt
+  profile_image          String?
+  created_at             DateTime?       @default(now()) @db.Timestamp(6)
+  updated_at             DateTime?       @default(now()) @db.Timestamp(6)
+  interests              String?
+  goals                  String?
+  notifications_received notifications[] @relation("NotificationRecipient")
+  notifications_sent     notifications[] @relation("NotificationSender")
+  post_comments          post_comments[] @relation("UserComments")
+  posts                  posts[]         @relation("UserPosts")
+}
+
+model verification_codes {
+  id         Int       @id @default(autoincrement())
+  email      String    @db.VarChar(255)
+  code       String    @db.VarChar(10)
+  expires_at DateTime? @db.Timestamp(6)
+  version    Int?      @default(0)
+  verified   Int?      @default(0) @db.SmallInt
+}
+
+model weekly_goals {
+  id               Int       @id @default(autoincrement())
+  user_id          Int?
+  text             String
+  progress         Int?      @default(0)
+  completed        Int?      @default(0) @db.SmallInt
+  week_start       DateTime? @db.Timestamp(6)
+  feedback_entries String?
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model notifications {
+  id           Int      @id @default(autoincrement())
+  recipient_id Int
+  sender_id    Int
+  type         String   @db.VarChar(20)
+  post_id      Int
+  text         String
+  read         Int      @default(0) @db.SmallInt
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+  post         posts    @relation("NotificationPost", fields: [post_id], references: [id], onDelete: Cascade)
+  recipient    users    @relation("NotificationRecipient", fields: [recipient_id], references: [id], onDelete: Cascade)
+  sender       users    @relation("NotificationSender", fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@index([recipient_id, created_at])
+  @@index([recipient_id, read])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model images {
+  id         Int       @id @default(autoincrement())
+  categories String[]
+  image_url  String
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+}
