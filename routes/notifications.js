@@ -3,7 +3,7 @@ const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// Middleware to verify JWT token (adjust based on your auth setup)k
+// Middleware to verify JWT token (adjust based on your auth setup)
 const { authMiddleware } = require("./auth");
 
 // Get all notifications for current user
@@ -44,7 +44,7 @@ router.get('/', authMiddleware, async (req, res) => {
         name: notif.sender.name,
         profileImage: notif.sender.profile_image,
       },
-      type: notif.type,
+      type: notif.type, // This now includes 'share'
       post: {
         _id: notif.post.id.toString(),
         text: notif.post.text,

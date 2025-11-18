@@ -220,6 +220,111 @@ router.post("/:id/comment", authMiddleware, async (req, res) => {
   }
 });
 
+// ✅ GET USERS FOR SHARING (exclude current user and post owner)
+router.get("/:id/share-users", authMiddleware, async (req, res) => {
+  try {
+    const userId = Number(req.user.id);
+    const postId = Number(req.params.id);
+
+    // Get the post to find its owner
+    const post = await prisma.posts.findUnique({
+      where: { id: postId },
+      select: { user_id: true },
+    });
+
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    // Get all users except current user and post owner
+    const users = await prisma.users.findMany({
+      where: {
+        id: {
+          notIn: [userId, post.user_id],
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        profile_image: true,
+      },
+      orderBy: {
+        name: 'asc',
+      },
+    });
+
+    const formattedUsers = users.map((u) => ({
+      _id: u.id.toString(),
+      name: u.name,
+      profileImage: u.profile_image,
+    }));
+
+    res.json(formattedUsers);
+  } catch (err) {
+    console.error("❌ GET /share-users error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// ✅ SHARE POST (with notification)
+router.post("/:id/share", authMiddleware, async (req, res) => {
+  try {
+    const userId = Number(req.user.id);
+    const postId = Number(req.params.id);
+    const { recipientId } = req.body;
+
+    if (!recipientId) {
+      return res.status(400).json({ message: "Recipient ID is required" });
+    }
+
+    const recipientIdNum = Number(recipientId);
+
+    // Get post details
+    const post = await prisma.posts.findUnique({
+      where: { id: postId },
+      select: { user_id: true, text: true },
+    });
+
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    // Verify recipient exists
+    const recipient = await prisma.users.findUnique({
+      where: { id: recipientIdNum },
+      select: { id: true, name: true },
+    });
+
+    if (!recipient) {
+      return res.status(404).json({ message: "Recipient not found" });
+    }
+
+    // Get sender's name for notification
+    const sender = await prisma.users.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    });
+
+    // Create notification for the recipient
+    await prisma.notifications.create({
+      data: {
+        sender_id: userId,
+        recipient_id: recipientIdNum,
+        post_id: postId,
+        type: "share",
+        text: `${sender.name} shared a post with you`,
+        read: 0,
+        created_at: new Date(),
+      },
+    });
+
+    res.json({ message: "Post shared successfully" });
+  } catch (err) {
+    console.error("❌ POST /share error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
 // ✅ FETCH FEED (excluding user's own posts) WITH INTEREST MATCHING
 router.get("/feed", authMiddleware, async (req, res) => {
   try {
@@ -334,6 +439,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// ✅ GET USER'S OWN POSTS
 router.get("/my-posts", authMiddleware, async (req, res) => {
   try {
     const userId = Number(req.user.id);
@@ -387,6 +493,5 @@ router.get("/my-posts", authMiddleware, async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
-
 
 module.exports = router;
