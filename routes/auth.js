@@ -47,15 +47,26 @@ const authMiddleware = (req, res, next) => {
 };
 
 // ========== Nodemailer Setup ==========
+// const transporter = nodemailer.createTransport({
+//   host: "smtp.gmail.com",
+//   port: 465,
+//   secure: true,
+//   auth: {
+//     user: process.env.EMAIL_USER,
+//     pass: process.env.EMAIL_PASS,
+//   },
+// });
+
 const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
+  host: process.env.SMTP_HOST || "smtp.railway.app", // Railway SMTP proxy
+  port: process.env.SMTP_PORT || 587,
+  secure: false,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
+
 
 // ========== Request OTP ==========
 router.post("/request-otp", async (req, res) => {
