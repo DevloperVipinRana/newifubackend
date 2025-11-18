@@ -3,6 +3,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
+    "rootPath": "newifubackend",
     "startCommand": "node index.js"
   }
 }
