@@ -4,9 +4,13 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const path = require("path");
-const nodemailer = require("nodemailer");
+const sgMail = require("@sendgrid/mail");
 const crypto = require("crypto");
 const prisma = require("../prismaClient");
+
+// ========== Initialize SendGrid ==========
+// Make sure SENDGRID_API_KEY is set in Railway env vars
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // ========== Multer setup for profile uploads ==========
 const storage = multer.diskStorage({
@@ -20,7 +24,9 @@ const storage = multer.diskStorage({
 
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const extname = allowedTypes.test(
+    path.extname(file.originalname).toLowerCase()
+  );
   const mimetype = allowedTypes.test(file.mimetype);
   if (mimetype && extname) return cb(null, true);
   cb(new Error("Only image files are allowed!"));
@@ -35,10 +41,14 @@ const upload = multer({
 // ========== Auth Middleware ==========
 const authMiddleware = (req, res, next) => {
   const token = req.header("Authorization");
-  if (!token) return res.status(401).json({ message: "No token, authorization denied" });
+  if (!token)
+    return res.status(401).json({ message: "No token, authorization denied" });
 
   try {
-    const decoded = jwt.verify(token.replace("Bearer ", ""), process.env.JWT_SECRET);
+    const decoded = jwt.verify(
+      token.replace("Bearer ", ""),
+      process.env.JWT_SECRET
+    );
     req.user = decoded;
     next();
   } catch {
@@ -46,55 +56,70 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// ========== Nodemailer Setup ==========
-// const transporter = nodemailer.createTransport({
-//   host: "smtp.gmail.com",
-//   port: 587,
-//   auth: {
-//     user: process.env.EMAIL_USER,
-//     pass: process.env.EMAIL_PASS,
-//   },
-// });
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false, // important
-  requireTLS: true,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  tls: {
-    rejectUnauthorized: false,
-  },
-});
-
-
-
-// ========== Request OTP ==========
+// ========== Request OTP with SendGrid ==========
 router.post("/request-otp", async (req, res) => {
   const { email } = req.body;
+
   try {
     const otpCode = crypto.randomInt(1000, 9999).toString();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
 
+    // Clear old OTPs for this email
     await prisma.verification_codes.deleteMany({ where: { email } });
 
+    // Store new OTP
     await prisma.verification_codes.create({
       data: { email, code: otpCode, expires_at: otpExpiry, verified: 0 },
     });
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
+    // ✅ Send OTP via SendGrid
+    const msg = {
       to: email,
-      subject: "Your OTP Code",
-      text: `Your verification code is ${otpCode}. It expires in 10 minutes.`,
-    });
+      // This sender **must** be verified in SendGrid (single sender or domain authenticated)
+      from: {
+        email: process.env.EMAIL_USER, // e.g. no-reply@yourdomain.com
+        name: "IFU App",
+      },
+      subject: "Your IFU OTP Code",
+      text: `Your IFU verification code is ${otpCode}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background:#f9fafb;">
+          <h2 style="color: #111827; margin-bottom: 8px;">Your IFU Verification Code</h2>
+          <p style="font-size: 15px; color: #4b5563; margin: 0 0 16px;">
+            Use the OTP below to complete your sign up:
+          </p>
+          <div style="text-align: center; margin: 24px 0;">
+            <span style="display: inline-block; padding: 12px 24px; border-radius: 8px; background: #111827; color: #f9fafb; font-size: 32px; letter-spacing: 6px; font-weight: bold;">
+              ${otpCode}
+            </span>
+          </div>
+          <p style="font-size: 14px; color: #6b7280; margin: 0 0 8px;">
+            This code will expire in <strong>10 minutes</strong>.
+          </p>
+          <p style="font-size: 12px; color: #9ca3af; margin-top: 24px;">
+            If you didn't request this code, you can safely ignore this email.
+          </p>
+        </div>
+      `,
+      // Small extra signals to avoid spam (optional)
+      headers: {
+        "X-Entity-Ref-ID": `ifu-otp-${Date.now()}`,
+      },
+    };
+
+    await sgMail.send(msg);
+    console.log("✅ OTP email sent via SendGrid to:", email);
 
     res.status(200).json({ message: "OTP sent to email", email });
   } catch (err) {
-    console.error("Error in /request-otp:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    console.error("❌ Error in /request-otp:", err);
+    if (err.response?.body) {
+      console.error("SendGrid error details:", err.response.body);
+    }
+    res.status(500).json({
+      message: "Failed to send OTP. Please try again.",
+      error: err.message,
+    });
   }
 });
 
@@ -106,7 +131,8 @@ router.post("/verify-otp", async (req, res) => {
       where: { email, code, expires_at: { gt: new Date() } },
     });
 
-    if (!record) return res.status(400).json({ message: "Invalid or expired OTP" });
+    if (!record)
+      return res.status(400).json({ message: "Invalid or expired OTP" });
 
     await prisma.verification_codes.updateMany({
       where: { email },
@@ -128,7 +154,10 @@ router.post("/signup", async (req, res) => {
     const verifiedOTP = await prisma.verification_codes.findFirst({
       where: { email, verified: 1 },
     });
-    if (!verifiedOTP) return res.status(400).json({ message: "Please verify your email first" });
+    if (!verifiedOTP)
+      return res
+        .status(400)
+        .json({ message: "Please verify your email first" });
 
     const existingUser = await prisma.users.findUnique({ where: { email } });
     if (existingUser) {
@@ -152,7 +181,9 @@ router.post("/signup", async (req, res) => {
 
     await prisma.verification_codes.deleteMany({ where: { email } });
 
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: "1d" });
+    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
+      expiresIn: "1d",
+    });
 
     res.status(201).json({
       message: "User registered successfully",
@@ -173,9 +204,12 @@ router.post("/login", async (req, res) => {
     if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
+    if (!isMatch)
+      return res.status(400).json({ message: "Invalid credentials" });
 
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: "1d" });
+    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
+      expiresIn: "1d",
+    });
 
     res.json({
       token,
@@ -244,11 +278,15 @@ router.put(
       // Handle booleans
       if (data.likes_to_travel)
         data.likes_to_travel =
-          data.likes_to_travel === "1" || data.likes_to_travel === "true" ? 1 : 0;
+          data.likes_to_travel === "1" || data.likes_to_travel === "true"
+            ? 1
+            : 0;
 
       // Handle image upload
       if (req.files?.length > 0) {
-        const imageFile = req.files.find((f) => f.fieldname === "profile_image");
+        const imageFile = req.files.find(
+          (f) => f.fieldname === "profile_image"
+        );
         if (imageFile) data.profile_image = `/uploads/${imageFile.filename}`;
       }
 
@@ -292,4 +330,3 @@ router.get("/me", authMiddleware, async (req, res) => {
 
 module.exports = router;
 module.exports.authMiddleware = authMiddleware;
-
