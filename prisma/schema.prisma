@@ -181,3 +181,26 @@ model images {
   image_url  String
   created_at DateTime? @default(now()) @db.Timestamp(6)
 }
+
+model one_min_library {
+  id       Int    @id @default(autoincrement())
+  key      String
+  category String
+  type     String
+  params   Json
+}
+
+model five_min_library {
+  id                Int      @id @default(autoincrement())
+  activity_key      String   @unique @db.VarChar(255)
+  title             String   @db.VarChar(255)
+  description       String?
+  icon              String?  @db.VarChar(100)
+  type              String?  @db.VarChar(100)
+  category          String?  @db.VarChar(255)
+  screen            String?  @db.VarChar(255)
+  param_title       String?  @db.VarChar(255)
+  param_description String?
+  param_category    String?  @db.VarChar(255)
+  instructions      String[]
+}

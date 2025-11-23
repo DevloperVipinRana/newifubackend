@@ -1,12 +1,70 @@
 const express = require("express");
 const router = express.Router();
-const prisma = require("../prismaClient"); // ✅ Prisma Client
+const prisma = require("../prismaClient");
 const { authMiddleware } = require("./auth");
+
+// ✅ Get all activities from library
+router.get("/library", authMiddleware, async (req, res) => {
+  try {
+    const activities = await prisma.five_min_library.findMany({
+      orderBy: { id: 'asc' }
+    });
+
+    console.log(`✅ Retrieved ${activities.length} activities from library`);
+    res.json(activities);
+  } catch (err) {
+    console.error("❌ Error in GET /five-min/library:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// ✅ Get activities filtered by type/category
+router.get("/library/filter", authMiddleware, async (req, res) => {
+  try {
+    const { type, category } = req.query;
+    
+    const where = {};
+    if (type) where.type = type;
+    if (category) where.category = { contains: category };
+
+    const activities = await prisma.five_min_library.findMany({
+      where,
+      orderBy: { id: 'asc' }
+    });
+
+    console.log(`✅ Filtered activities: ${activities.length}`);
+    res.json(activities);
+  } catch (err) {
+    console.error("❌ Error in GET /five-min/library/filter:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// ✅ Get single activity by key
+router.get("/library/:activityKey", authMiddleware, async (req, res) => {
+  try {
+    const { activityKey } = req.params;
+
+    const activity = await prisma.five_min_library.findUnique({
+      where: { activity_key: activityKey }
+    });
+
+    if (!activity) {
+      return res.status(404).json({ message: "Activity not found" });
+    }
+
+    console.log(`✅ Retrieved activity: ${activity.title}`);
+    res.json(activity);
+  } catch (err) {
+    console.error("❌ Error in GET /five-min/library/:activityKey:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
 
 // ✅ Log a completed 5-min activity
 router.post("/log", authMiddleware, async (req, res) => {
   try {
-    const { activityKey, title } = req.body;
+    const { activityKey, title, category } = req.body;
     const userId = Number(req.user.id);
 
     if (!activityKey || !title) {
@@ -15,7 +73,6 @@ router.post("/log", authMiddleware, async (req, res) => {
         .json({ message: "activityKey and title are required" });
     }
 
-    // Create new log
     const newLog = await prisma.five_min_activities.create({
       data: {
         user_id: userId,

@@ -4,12 +4,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const path = require("path");
-const sgMail = require("@sendgrid/mail");
+const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 const prisma = require("../prismaClient");
-
-// ========== Initialize SendGrid ==========
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // ========== Multer setup for profile uploads ==========
 const storage = multer.diskStorage({
@@ -49,7 +46,17 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// ========== Request OTP with SendGrid ==========
+// ========== Nodemailer Setup ==========
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 587,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// ========== Request OTP ==========
 router.post("/request-otp", async (req, res) => {
   const { email } = req.body;
   try {
@@ -62,35 +69,17 @@ router.post("/request-otp", async (req, res) => {
       data: { email, code: otpCode, expires_at: otpExpiry, verified: 0 },
     });
 
-    // ✅ Send OTP via SendGrid
-    const msg = {
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
       to: email,
-      from: process.env.EMAIL_USER, // Must be verified in SendGrid
       subject: "Your OTP Code",
       text: `Your verification code is ${otpCode}. It expires in 10 minutes.`,
-      html: `<div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #333;">Your Verification Code</h2>
-        <p style="font-size: 16px; color: #555;">Your OTP code is:</p>
-        <h1 style="color: #4CAF50; letter-spacing: 5px; font-size: 42px; margin: 20px 0;">${otpCode}</h1>
-        <p style="font-size: 14px; color: #777;">This code will expire in 10 minutes.</p>
-        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-        <p style="font-size: 12px; color: #999;">If you didn't request this code, please ignore this email.</p>
-      </div>`,
-    };
-
-    await sgMail.send(msg);
-    console.log("✅ OTP email sent successfully via SendGrid to:", email);
+    });
 
     res.status(200).json({ message: "OTP sent to email", email });
   } catch (err) {
-    console.error("❌ Error in /request-otp:", err);
-    if (err.response) {
-      console.error("SendGrid error details:", err.response.body);
-    }
-    res.status(500).json({ 
-      message: "Failed to send OTP. Please try again.", 
-      error: err.message 
-    });
+    console.error("Error in /request-otp:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 });
 
@@ -288,3 +277,4 @@ router.get("/me", authMiddleware, async (req, res) => {
 
 module.exports = router;
 module.exports.authMiddleware = authMiddleware;
+

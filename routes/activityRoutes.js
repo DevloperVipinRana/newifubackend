@@ -4,13 +4,55 @@ const router = express.Router();
 const prisma = require("../prismaClient"); // ✅ Prisma client
 const { authMiddleware } = require("./auth");
 
+// ✅ NEW: Get activity library from database
+router.get("/library", authMiddleware, async (req, res) => {
+  console.log("📚 Fetching activity library from database...");
+  
+  try {
+    // Fetch all activities from one_min_library table
+    const activities = await prisma.one_min_library.findMany({
+      select: {
+        id: true,
+        key: true,
+        category: true,
+        type: true,
+        params: true,
+      },
+      orderBy: {
+        id: 'asc', // Optional: order by ID
+      },
+    });
+
+    console.log(`✅ Found ${activities.length} activities in library`);
+
+    // Transform the data (params is already parsed from JSON by Prisma)
+    const transformedActivities = activities.map(activity => ({
+      key: activity.key,
+      category: activity.category,
+      type: activity.type,
+      params: activity.params, // Already a JSON object from Prisma
+    }));
+
+    res.json(transformedActivities);
+  } catch (err) {
+    console.error('❌ Error fetching activity library:', err);
+    console.error('❌ Error name:', err.name);
+    console.error('❌ Error message:', err.message);
+    res.status(500).json({ 
+      message: 'Failed to fetch activity library',
+      error: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
+});
+
 // ✅ Save completed activity
 router.post("/complete", authMiddleware, async (req, res) => {
   console.log("✅ Activity completion request received:", req.body);
   console.log("🔐 User from auth middleware:", req.user);
 
   try {
-    const { activityKey, title, response, feedback } = req.body;
+    const { activityKey, title, response, category, feedback } = req.body;
 
     if (!activityKey || !title) {
       return res.status(400).json({ message: "Missing activityKey or title" });
@@ -69,9 +111,6 @@ router.post("/complete", authMiddleware, async (req, res) => {
     });
   }
 });
-
-
-
 
 // ✅ Update activity feedback
 router.post("/update-feedback", authMiddleware, async (req, res) => {
