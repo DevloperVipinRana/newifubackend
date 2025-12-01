@@ -10,7 +10,6 @@ router.get("/library", authMiddleware, async (req, res) => {
       orderBy: { id: 'asc' }
     });
 
-    console.log(`✅ Retrieved ${activities.length} activities from library`);
     res.json(activities);
   } catch (err) {
     console.error("❌ Error in GET /five-min/library:", err);
@@ -53,7 +52,6 @@ router.get("/library/:activityKey", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Activity not found" });
     }
 
-    console.log(`✅ Retrieved activity: ${activity.title}`);
     res.json(activity);
   } catch (err) {
     console.error("❌ Error in GET /five-min/library/:activityKey:", err);
@@ -101,7 +99,6 @@ router.get("/logs", authMiddleware, async (req, res) => {
       orderBy: { completed_at: "desc" },
     });
 
-    console.log(`✅ Retrieved ${logs.length} logs for user ${userId}`);
     res.json(logs);
   } catch (err) {
     console.error("❌ Error in GET /five-min/logs:", err);

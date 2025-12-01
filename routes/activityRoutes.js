@@ -23,8 +23,6 @@ router.get("/library", authMiddleware, async (req, res) => {
       },
     });
 
-    console.log(`✅ Found ${activities.length} activities in library`);
-
     // Transform the data (params is already parsed from JSON by Prisma)
     const transformedActivities = activities.map(activity => ({
       key: activity.key,
@@ -78,8 +76,6 @@ router.post("/complete", authMiddleware, async (req, res) => {
     const feedbackEmoji = feedback?.emoji || null;
     const feedbackLabel = feedback?.label || null;
 
-    console.log("💾 Attempting to save activity to database...");
-
     const activity = await prisma.activities.create({
       data: {
         user_id: userId,
@@ -95,7 +91,6 @@ router.post("/complete", authMiddleware, async (req, res) => {
       },
     });
 
-    console.log("✅ Activity saved successfully, ID:", activity.id);
     res.status(201).json({ message: "Activity saved", log: activity });
   } catch (err) {
     console.error("❌ Error saving activity:", err);

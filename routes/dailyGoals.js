@@ -65,7 +65,6 @@ router.get("/", authMiddleware, async (req, res) => {
     });
 
     const formatted = goals.map(formatGoalResponse);
-    console.log(`✅ Fetched ${formatted.length} daily goals for user ${userId}`);
     res.json(formatted);
   } catch (err) {
     console.error("❌ Error fetching daily goals:", err);

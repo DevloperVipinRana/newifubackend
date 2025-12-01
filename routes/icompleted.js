@@ -75,8 +75,6 @@ router.get("/my", authMiddleware, async (req, res) => {
       orderBy: { created_at: "desc" },
     });
 
-    console.log(`✅ Fetched ${achievements.length} achievements for user ${userId}`);
-
     res.json(achievements.map(formatAchievement));
   } catch (err) {
     console.error("❌ GET /api/icompleted/my error:", err);

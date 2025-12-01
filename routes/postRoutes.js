@@ -485,8 +485,6 @@ router.get("/my-posts", authMiddleware, async (req, res) => {
       },
     }));
 
-    console.log(`📊 User posts: ${formatted.length} posts found for user ${userId}`);
-
     res.json(formatted);
   } catch (err) {
     console.error("❌ GET /my-posts error:", err);

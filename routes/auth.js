@@ -9,7 +9,6 @@ const crypto = require("crypto");
 const prisma = require("../prismaClient");
 
 // ========== Initialize SendGrid ==========
-// Make sure SENDGRID_API_KEY is set in Railway env vars
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // ========== Multer setup for profile uploads ==========
@@ -24,9 +23,7 @@ const storage = multer.diskStorage({
 
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif/;
-  const extname = allowedTypes.test(
-    path.extname(file.originalname).toLowerCase()
-  );
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
   if (mimetype && extname) return cb(null, true);
   cb(new Error("Only image files are allowed!"));
@@ -64,60 +61,37 @@ router.post("/request-otp", async (req, res) => {
     const otpCode = crypto.randomInt(1000, 9999).toString();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Clear old OTPs for this email
     await prisma.verification_codes.deleteMany({ where: { email } });
 
-    // Store new OTP
     await prisma.verification_codes.create({
       data: { email, code: otpCode, expires_at: otpExpiry, verified: 0 },
     });
 
-    // ✅ Send OTP via SendGrid
     const msg = {
       to: email,
-      // This sender **must** be verified in SendGrid (single sender or domain authenticated)
       from: {
-        email: process.env.EMAIL_USER, // e.g. no-reply@yourdomain.com
+        email: process.env.EMAIL_USER,
         name: "IFU App",
       },
       subject: "Your IFU OTP Code",
-      text: `Your IFU verification code is ${otpCode}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
+      text: `Your IFU verification code is ${otpCode}. It expires in 10 minutes.`,
       html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background:#f9fafb;">
-          <h2 style="color: #111827; margin-bottom: 8px;">Your IFU Verification Code</h2>
-          <p style="font-size: 15px; color: #4b5563; margin: 0 0 16px;">
-            Use the OTP below to complete your sign up:
-          </p>
-          <div style="text-align: center; margin: 24px 0;">
-            <span style="display: inline-block; padding: 12px 24px; border-radius: 8px; background: #111827; color: #f9fafb; font-size: 32px; letter-spacing: 6px; font-weight: bold;">
-              ${otpCode}
-            </span>
-          </div>
-          <p style="font-size: 14px; color: #6b7280; margin: 0 0 8px;">
-            This code will expire in <strong>10 minutes</strong>.
-          </p>
-          <p style="font-size: 12px; color: #9ca3af; margin-top: 24px;">
-            If you didn't request this code, you can safely ignore this email.
-          </p>
+        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px;">
+          <h2>Your IFU Verification Code</h2>
+          <div style="font-size: 28px; font-weight: bold;">${otpCode}</div>
+          <p>This code will expire in 10 minutes.</p>
         </div>
       `,
-      // Small extra signals to avoid spam (optional)
-      headers: {
-        "X-Entity-Ref-ID": `ifu-otp-${Date.now()}`,
-      },
     };
 
     await sgMail.send(msg);
-    console.log("✅ OTP email sent via SendGrid to:", email);
+    console.log("✅ OTP sent via SendGrid:", email);
 
     res.status(200).json({ message: "OTP sent to email", email });
   } catch (err) {
     console.error("❌ Error in /request-otp:", err);
-    if (err.response?.body) {
-      console.error("SendGrid error details:", err.response.body);
-    }
     res.status(500).json({
-      message: "Failed to send OTP. Please try again.",
+      message: "Failed to send OTP",
       error: err.message,
     });
   }
@@ -155,9 +129,7 @@ router.post("/signup", async (req, res) => {
       where: { email, verified: 1 },
     });
     if (!verifiedOTP)
-      return res
-        .status(400)
-        .json({ message: "Please verify your email first" });
+      return res.status(400).json({ message: "Please verify your email first" });
 
     const existingUser = await prisma.users.findUnique({ where: { email } });
     if (existingUser) {
@@ -241,7 +213,6 @@ router.put(
       const userId = Number(req.user.id);
       const fields = { ...req.body };
 
-      // Map frontend → DB columns
       const mapping = {
         ageGroup: "age_group",
         zipCode: "zip_code",
@@ -264,7 +235,6 @@ router.put(
         data[dbKey] = fields[key];
       }
 
-      // Parse JSON fields
       ["interests", "goals"].forEach((k) => {
         if (data[k]) {
           try {
@@ -275,14 +245,12 @@ router.put(
         }
       });
 
-      // Handle booleans
       if (data.likes_to_travel)
         data.likes_to_travel =
           data.likes_to_travel === "1" || data.likes_to_travel === "true"
             ? 1
             : 0;
 
-      // Handle image upload
       if (req.files?.length > 0) {
         const imageFile = req.files.find(
           (f) => f.fieldname === "profile_image"
@@ -290,7 +258,6 @@ router.put(
         if (imageFile) data.profile_image = `/uploads/${imageFile.filename}`;
       }
 
-      // Mark profile as completed
       data.profile_completed = 1;
 
       const updated = await prisma.users.update({
