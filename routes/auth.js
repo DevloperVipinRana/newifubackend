@@ -11,7 +11,7 @@ const prisma = require("../prismaClient");
 // ========== Initialize SendGrid ==========
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-// ========== Multer setup for profile uploads ==========
+// ========== Multer setup ==========
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, "uploads/"),
   filename: (req, file, cb) => {
@@ -29,23 +29,15 @@ const fileFilter = (req, file, cb) => {
   cb(new Error("Only image files are allowed!"));
 };
 
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
-});
+const upload = multer({ storage, fileFilter });
 
 // ========== Auth Middleware ==========
 const authMiddleware = (req, res, next) => {
   const token = req.header("Authorization");
-  if (!token)
-    return res.status(401).json({ message: "No token, authorization denied" });
+  if (!token) return res.status(401).json({ message: "No token" });
 
   try {
-    const decoded = jwt.verify(
-      token.replace("Bearer ", ""),
-      process.env.JWT_SECRET
-    );
+    const decoded = jwt.verify(token.replace("Bearer ", ""), process.env.JWT_SECRET);
     req.user = decoded;
     next();
   } catch {
@@ -53,7 +45,15 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// ========== Request OTP with SendGrid ==========
+// ========== Check Email Exists ==========
+router.post("/check-email", async (req, res) => {
+  const { email } = req.body;
+  const user = await prisma.users.findUnique({ where: { email } });
+  if (!user) return res.status(404).json({ message: "No account found" });
+  res.json({ exists: true });
+});
+
+// ========== SEND OTP (Signup) ==========
 router.post("/request-otp", async (req, res) => {
   const { email } = req.body;
 
@@ -69,230 +69,133 @@ router.post("/request-otp", async (req, res) => {
 
     const msg = {
       to: email,
-      from: {
-        email: process.env.EMAIL_USER,
-        name: "IFU App",
-      },
-      subject: "Your IFU OTP Code",
-      text: `Your IFU verification code is ${otpCode}. It expires in 10 minutes.`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px;">
-          <h2>Your IFU Verification Code</h2>
-          <div style="font-size: 28px; font-weight: bold;">${otpCode}</div>
-          <p>This code will expire in 10 minutes.</p>
-        </div>
-      `,
+      from: { email: process.env.EMAIL_USER, name: "IFU App" },
+      subject: "Your Signup OTP",
+      text: `Your verification code is ${otpCode}`,
     };
 
     await sgMail.send(msg);
-    console.log("✅ OTP sent via SendGrid:", email);
-
-    res.status(200).json({ message: "OTP sent to email", email });
+    res.json({ message: "OTP sent", email });
   } catch (err) {
-    console.error("❌ Error in /request-otp:", err);
-    res.status(500).json({
-      message: "Failed to send OTP",
-      error: err.message,
-    });
+    res.status(500).json({ message: "OTP send failed", error: err.message });
   }
 });
 
-// ========== Verify OTP ==========
-router.post("/verify-otp", async (req, res) => {
-  const { email, code } = req.body;
-  try {
-    const record = await prisma.verification_codes.findFirst({
-      where: { email, code, expires_at: { gt: new Date() } },
-    });
-
-    if (!record)
-      return res.status(400).json({ message: "Invalid or expired OTP" });
-
-    await prisma.verification_codes.updateMany({
-      where: { email },
-      data: { verified: 1 },
-    });
-
-    res.json({ message: "OTP verified successfully" });
-  } catch (err) {
-    console.error("Error in /verify-otp:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-});
-
-// ========== Signup ==========
-router.post("/signup", async (req, res) => {
-  const { name, email, password, zip_code, gender, timezone } = req.body;
+// ========== SEND RESET OTP ==========
+router.post("/request-password-reset-otp", async (req, res) => {
+  const { email } = req.body;
 
   try {
-    const verifiedOTP = await prisma.verification_codes.findFirst({
-      where: { email, verified: 1 },
-    });
-    if (!verifiedOTP)
-      return res.status(400).json({ message: "Please verify your email first" });
+    const user = await prisma.users.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ message: "No account found" });
 
-    const existingUser = await prisma.users.findUnique({ where: { email } });
-    if (existingUser) {
-      await prisma.verification_codes.deleteMany({ where: { email } });
-      return res.status(400).json({ message: "User already exists" });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const user = await prisma.users.create({
-      data: {
-        name,
-        email,
-        password: hashedPassword,
-        zip_code,
-        gender,
-        timezone,
-        profile_completed: 0,
-      },
-    });
+    const otpCode = crypto.randomInt(1000, 9999).toString();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
 
     await prisma.verification_codes.deleteMany({ where: { email } });
 
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
-      expiresIn: "1d",
+    await prisma.verification_codes.create({
+      data: { email, code: otpCode, expires_at: otpExpiry, verified: 0 },
     });
 
-    res.status(201).json({
-      message: "User registered successfully",
-      token,
-      user: { id: user.id, name, email, gender, zip_code, timezone },
-    });
+    const msg = {
+      to: email,
+      from: { email: process.env.EMAIL_USER, name: "IFU App" },
+      subject: "Password Reset OTP",
+      text: `Your password reset OTP is ${otpCode}`,
+    };
+
+    await sgMail.send(msg);
+    res.json({ message: "Password reset OTP sent", email });
   } catch (err) {
-    console.error("Error in /signup:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    res.status(500).json({ message: "OTP send failed", error: err.message });
   }
 });
 
-// ========== Login ==========
+// ========== VERIFY OTP ==========
+router.post("/verify-otp", async (req, res) => {
+  const { email, code } = req.body;
+
+  const record = await prisma.verification_codes.findFirst({
+    where: { email, code, expires_at: { gt: new Date() } },
+  });
+
+  if (!record) return res.status(400).json({ message: "Invalid OTP" });
+
+  await prisma.verification_codes.updateMany({
+    where: { email },
+    data: { verified: 1 },
+  });
+
+  res.json({ message: "OTP verified" });
+});
+
+// ========== RESET PASSWORD ==========
+router.post("/reset-password", async (req, res) => {
+  const { email, password } = req.body;
+
+  const verifiedOTP = await prisma.verification_codes.findFirst({
+    where: { email, verified: 1 },
+  });
+
+  if (!verifiedOTP) return res.status(400).json({ message: "Verify OTP first" });
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  await prisma.users.update({
+    where: { email },
+    data: { password: hashedPassword },
+  });
+
+  await prisma.verification_codes.deleteMany({ where: { email } });
+
+  res.json({ message: "Password reset successful" });
+});
+
+// ========== SIGNUP ==========
+router.post("/signup", async (req, res) => {
+  const { name, email, password, zip_code, gender, timezone } = req.body;
+
+  const verifiedOTP = await prisma.verification_codes.findFirst({
+    where: { email, verified: 1 },
+  });
+
+  if (!verifiedOTP) return res.status(400).json({ message: "Verify OTP first" });
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const user = await prisma.users.create({
+    data: {
+      name,
+      email,
+      password: hashedPassword,
+      zip_code,
+      gender,
+      timezone,
+      profile_completed: 0,
+    },
+  });
+
+  await prisma.verification_codes.deleteMany({ where: { email } });
+
+  const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: "1d" });
+
+  res.json({ token, user });
+});
+
+// ========== LOGIN ==========
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  try {
-    const user = await prisma.users.findUnique({ where: { email } });
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
-      return res.status(400).json({ message: "Invalid credentials" });
+  const user = await prisma.users.findUnique({ where: { email } });
+  if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
-      expiresIn: "1d",
-    });
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        profileCompleted: user.profile_completed,
-      },
-    });
-  } catch (err) {
-    console.error("Error in /login:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-});
+  const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: "1d" });
 
-// ========== Update Profile ==========
-router.put(
-  "/profile",
-  authMiddleware,
-  (req, res, next) => {
-    upload.any()(req, res, (err) => {
-      if (err) return res.status(400).json({ message: err.message });
-      next();
-    });
-  },
-  async (req, res) => {
-    try {
-      const userId = Number(req.user.id);
-      const fields = { ...req.body };
-
-      const mapping = {
-        ageGroup: "age_group",
-        zipCode: "zip_code",
-        musicTaste: "music_taste",
-        phoneUsage: "phone_usage",
-        favMusician: "fav_musician",
-        favSports: "fav_sports",
-        indoorTime: "indoor_time",
-        outdoorTime: "outdoor_time",
-        favWork: "fav_work",
-        favPlace: "fav_place",
-        movieGenre: "movie_genre",
-        likesToTravel: "likes_to_travel",
-        profileImage: "profile_image",
-      };
-
-      const data = {};
-      for (const key in fields) {
-        const dbKey = mapping[key] || key;
-        data[dbKey] = fields[key];
-      }
-
-      ["interests", "goals"].forEach((k) => {
-        if (data[k]) {
-          try {
-            data[k] = JSON.stringify(JSON.parse(data[k]));
-          } catch {
-            data[k] = "[]";
-          }
-        }
-      });
-
-      if (data.likes_to_travel)
-        data.likes_to_travel =
-          data.likes_to_travel === "1" || data.likes_to_travel === "true"
-            ? 1
-            : 0;
-
-      if (req.files?.length > 0) {
-        const imageFile = req.files.find(
-          (f) => f.fieldname === "profile_image"
-        );
-        if (imageFile) data.profile_image = `/uploads/${imageFile.filename}`;
-      }
-
-      data.profile_completed = 1;
-
-      const updated = await prisma.users.update({
-        where: { id: userId },
-        data,
-      });
-
-      res.json(updated);
-    } catch (err) {
-      console.error("Error in /profile update:", err);
-      res.status(500).json({ message: "Server error", error: err.message });
-    }
-  }
-);
-
-// ========== Get Profile ==========
-router.get("/profile", authMiddleware, async (req, res) => {
-  try {
-    const user = await prisma.users.findUnique({ where: { id: req.user.id } });
-    res.json(user);
-  } catch (err) {
-    console.error("Error in /profile get:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
-});
-
-// ========== Get Current User ==========
-router.get("/me", authMiddleware, async (req, res) => {
-  try {
-    const user = await prisma.users.findUnique({ where: { id: req.user.id } });
-    res.json(user);
-  } catch (err) {
-    console.error("Error in /me:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
-  }
+  res.json({ token, user });
 });
 
 module.exports = router;
