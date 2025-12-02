@@ -160,6 +160,36 @@ router.post("/verify-otp", async (req, res) => {
   }
 });
 
+// ========== ✅ Verify Password Reset OTP (FOR APK) ==========
+router.post("/verify-password-reset-otp", async (req, res) => {
+  const { email, code } = req.body;
+
+  try {
+    const record = await prisma.verification_codes.findFirst({
+      where: {
+        email,
+        code,
+        expires_at: { gt: new Date() },
+      },
+    });
+
+    if (!record) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    await prisma.verification_codes.updateMany({
+      where: { email, code },
+      data: { verified: 1 },
+    });
+
+    res.json({ message: "OTP verified successfully" });
+  } catch (err) {
+    console.error("Error in /verify-password-reset-otp:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+
 // ========== Reset Password ==========
 router.post("/reset-password", async (req, res) => {
   const { email, password } = req.body;
