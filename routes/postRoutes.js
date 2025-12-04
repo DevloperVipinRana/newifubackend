@@ -2,21 +2,62 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
+const sharp = require("sharp"); // ✅ ADD THIS
+const fs = require("fs").promises; // ✅ ADD THIS for file operations
 const { authMiddleware } = require("./auth");
 const prisma = require("../prismaClient");
 
-// --- Multer setup for image uploads ---
+// --- Multer setup for image uploads (temporary storage) ---
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/posts/"),
+  destination: (req, file, cb) => cb(null, "uploads/posts/temp/"), // ✅ TEMP FOLDER
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
     cb(null, `${req.user.id}_${Date.now()}${ext}`);
   },
 });
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+    cb(new Error("Only image files are allowed!"));
+  },
+});
 
-// ✅ CREATE NEW POST
+// ✅ HELPER FUNCTION: Convert image to WebP
+const convertToWebP = async (inputPath, outputPath) => {
+  try {
+    await sharp(inputPath)
+      .webp({ 
+        quality: 80, // Good balance between quality and file size
+        effort: 4    // Compression effort (0-6, higher = better compression but slower)
+      })
+      .resize(1200, 1200, { // Max dimensions while maintaining aspect ratio
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .toFile(outputPath);
+    
+    // Delete original file after conversion
+    await fs.unlink(inputPath);
+    
+    return true;
+  } catch (error) {
+    console.error("Error converting image to WebP:", error);
+    throw error;
+  }
+};
+
+// ✅ CREATE NEW POST (with WebP conversion)
 router.post("/", authMiddleware, upload.single("image"), async (req, res) => {
+  let webpPath = null;
+  
   try {
     const { text, hashtags } = req.body;
 
@@ -32,14 +73,24 @@ router.post("/", authMiddleware, upload.single("image"), async (req, res) => {
       }
     }
 
-    const imagePath = req.file ? `/uploads/posts/${req.file.filename}` : null;
+    // ✅ Convert image to WebP if uploaded
+    if (req.file) {
+      const originalPath = req.file.path;
+      const webpFilename = `${req.user.id}_${Date.now()}.webp`;
+      const webpFullPath = path.join("uploads/posts/", webpFilename);
+      
+      // Convert to WebP
+      await convertToWebP(originalPath, webpFullPath);
+      
+      webpPath = `/uploads/posts/${webpFilename}`;
+    }
 
     // Create post with hashtags
     const post = await prisma.posts.create({
       data: {
         user_id: Number(req.user.id),
         text,
-        image: imagePath,
+        image: webpPath,
         created_at: new Date(),
         updated_at: new Date(),
         post_hashtags: {
@@ -53,6 +104,18 @@ router.post("/", authMiddleware, upload.single("image"), async (req, res) => {
 
     res.status(201).json({ id: post.id, message: "Post created successfully" });
   } catch (err) {
+    // ✅ Cleanup: Delete uploaded file if post creation fails
+    if (req.file) {
+      try {
+        await fs.unlink(req.file.path).catch(() => {});
+        if (webpPath) {
+          await fs.unlink(path.join(".", webpPath)).catch(() => {});
+        }
+      } catch (cleanupErr) {
+        console.error("Cleanup error:", cleanupErr);
+      }
+    }
+    
     console.error("❌ POST /api/posts error:", err);
     res.status(500).json({ message: "Server error", error: err.message });
   }
@@ -407,7 +470,6 @@ router.get("/feed", authMiddleware, async (req, res) => {
       ...formatted.filter((p) => !p.matchesInterest),
     ];
 
-    console.log(`📊 Feed stats: ${sortedPosts.filter(p => p.matchesInterest).length} matching, ${sortedPosts.filter(p => !p.matchesInterest).length} other posts`);
 
     res.json(sortedPosts);
   } catch (err) {
@@ -491,5 +553,6 @@ router.get("/my-posts", authMiddleware, async (req, res) => {
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });
+
 
 module.exports = router;
