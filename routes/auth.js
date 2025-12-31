@@ -9,13 +9,13 @@ const crypto = require("crypto");
 const prisma = require("../prismaClient");
 
 /* ===================== Nodemailer Setup ===================== */
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
+ const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT),
+  secure: false, // MUST be false for port 587
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
   },
 });
 
@@ -88,12 +88,19 @@ router.post("/request-otp", async (req, res) => {
       data: { email, code: otpCode, expires_at: otpExpiry, verified: 0 },
     });
 
+    // await transporter.sendMail({
+    //   from: `"IFU App" <${process.env.EMAIL_USER}>`,
+    //   to: email,
+    //   subject: "Your IFU OTP Code",
+    //   text: `Your verification code is ${otpCode}. It expires in 10 minutes.`,
+    // });
     await transporter.sendMail({
-      from: `"IFU App" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "Your IFU OTP Code",
-      text: `Your verification code is ${otpCode}. It expires in 10 minutes.`,
-    });
+  from: `"IFU App" <${process.env.EMAIL_USER}>`,
+  to: email,
+  subject: "Your OTP Code",
+  text: `Your OTP is ${otpCode}. Valid for 10 minutes.`,
+});
+
 
     res.json({ message: "OTP sent to email" });
   } catch (err) {
