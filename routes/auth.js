@@ -4,20 +4,17 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const path = require("path");
-const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 const prisma = require("../prismaClient");
 
-/* ===================== Nodemailer Setup ===================== */
- const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
-  secure: false, // MUST be false for port 587
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+/* ===================== Brevo API Setup ===================== */
+const SibApiV3Sdk = require("sib-api-v3-sdk");
+
+const client = SibApiV3Sdk.ApiClient.instance;
+client.authentications["api-key"].apiKey =
+  process.env.BREVO_API_KEY;
+
+const emailApi = new SibApiV3Sdk.TransactionalEmailsApi();
 
 /* ===================== Multer setup ===================== */
 const storage = multer.diskStorage({
@@ -31,7 +28,9 @@ const storage = multer.diskStorage({
 
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const extname = allowedTypes.test(
+    path.extname(file.originalname).toLowerCase()
+  );
   const mimetype = allowedTypes.test(file.mimetype);
   if (mimetype && extname) return cb(null, true);
   cb(new Error("Only image files are allowed!"));
@@ -88,19 +87,15 @@ router.post("/request-otp", async (req, res) => {
       data: { email, code: otpCode, expires_at: otpExpiry, verified: 0 },
     });
 
-    // await transporter.sendMail({
-    //   from: `"IFU App" <${process.env.EMAIL_USER}>`,
-    //   to: email,
-    //   subject: "Your IFU OTP Code",
-    //   text: `Your verification code is ${otpCode}. It expires in 10 minutes.`,
-    // });
-    await transporter.sendMail({
-  from: `"IFU App" <${process.env.EMAIL_USER}>`,
-  to: email,
-  subject: "Your OTP Code",
-  text: `Your OTP is ${otpCode}. Valid for 10 minutes.`,
-});
-
+    await emailApi.sendTransacEmail({
+      sender: {
+        email: process.env.EMAIL_USER,
+        name: "IFU App",
+      },
+      to: [{ email }],
+      subject: "Your OTP Code",
+      textContent: `Your OTP is ${otpCode}. It expires in 10 minutes.`,
+    });
 
     res.json({ message: "OTP sent to email" });
   } catch (err) {
@@ -129,11 +124,14 @@ router.post("/request-password-reset-otp", async (req, res) => {
       data: { email, code: otpCode, expires_at: otpExpiry, verified: 0 },
     });
 
-    await transporter.sendMail({
-      from: `"IFU App" <${process.env.EMAIL_USER}>`,
-      to: email,
+    await emailApi.sendTransacEmail({
+      sender: {
+        email: process.env.EMAIL_USER,
+        name: "IFU App",
+      },
+      to: [{ email }],
       subject: "Password Reset OTP",
-      text: `Your password reset verification code is ${otpCode}. It expires in 10 minutes.`,
+      textContent: `Your password reset code is ${otpCode}. It expires in 10 minutes.`,
     });
 
     res.json({ message: "Password reset OTP sent" });
